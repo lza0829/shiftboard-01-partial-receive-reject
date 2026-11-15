@@ -36,12 +36,21 @@ CREATE TABLE IF NOT EXISTS handover_items (
   batch_id INTEGER NOT NULL REFERENCES batches(id),
   PRIMARY KEY (handover_id, batch_id)
 );
+CREATE TABLE IF NOT EXISTS handover_rejections (
+  handover_id INTEGER NOT NULL REFERENCES handovers(id),
+  batch_id INTEGER NOT NULL REFERENCES batches(id),
+  reason TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (handover_id, batch_id)
+);
 CREATE TABLE IF NOT EXISTS reconcile_reports (
   id INTEGER PRIMARY KEY,
   handover_id INTEGER REFERENCES handovers(id),
   before_count INTEGER NOT NULL,
   after_from_count INTEGER NOT NULL,
   after_to_count INTEGER NOT NULL,
+  transferred_count INTEGER NOT NULL DEFAULT 0,
+  rejected_count INTEGER NOT NULL DEFAULT 0,
   consistent INTEGER NOT NULL,
   detail_json TEXT NOT NULL,
   created_at TEXT NOT NULL
@@ -49,9 +58,24 @@ CREATE TABLE IF NOT EXISTS reconcile_reports (
 """
 
 
+def _ensure_column(conn, table: str, column: str, ddl: str) -> None:
+    cols = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+
+
 def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
+        # 老库就地补列：对账报告分桶（过户数/拒收数）
+        _ensure_column(
+            conn, "reconcile_reports", "transferred_count",
+            "transferred_count INTEGER NOT NULL DEFAULT 0",
+        )
+        _ensure_column(
+            conn, "reconcile_reports", "rejected_count",
+            "rejected_count INTEGER NOT NULL DEFAULT 0",
+        )
         n = conn.execute("SELECT COUNT(*) AS c FROM shifts").fetchone()["c"]
         if n:
             return
